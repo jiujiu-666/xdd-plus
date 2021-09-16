@@ -71,11 +71,11 @@ var handleMessage = func(msgs ...interface{}) interface{} {
 	if sender.UserID == Config.TelegramUserID || sender.UserID == int(Config.QQID) {
 		sender.IsAdmin = true
 	}
-	logs.Info(sender.UserID)
-	if IsUserAdmin(strconv.Itoa(sender.UserID)) {
-		sender.IsAdmin = true
+	if sender.IsAdmin == false {
+		if IsUserAdmin(strconv.Itoa(sender.UserID)) {
+			sender.IsAdmin = true
+		}
 	}
-
 	for i := range codeSignals {
 		for j := range codeSignals[i].Command {
 			if codeSignals[i].Command[j] == head {
@@ -90,6 +90,20 @@ var handleMessage = func(msgs ...interface{}) interface{} {
 	}
 	switch msg {
 	default:
+		{ //沃邮箱
+			ss := regexp.MustCompile(`https://nyan.mail.*3D`).FindStringSubmatch(msg)
+			if len(ss) > 0 {
+				var u User
+				if db.Where("number = ?", sender.UserID).First(&u).Error != nil {
+					return 0
+				}
+				db.Model(u).Updates(map[string]interface{}{
+					"womail": ss[0],
+				})
+				sender.Reply(fmt.Sprintf("沃邮箱提交成功!"))
+				return nil
+			}
+		}
 		{
 			if strings.Contains(msg, "wskey=") {
 				rsp := cmd(fmt.Sprintf(`python3 test.py "%s"`, msg), &Sender{})
@@ -156,6 +170,7 @@ var handleMessage = func(msgs ...interface{}) interface{} {
 									ck.Update(QQ, ck.QQ)
 								}
 								sender.Reply(fmt.Sprintf(msg))
+								(&JdCookie{}).Push(msg)
 								logs.Info(msg)
 							}
 
