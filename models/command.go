@@ -118,6 +118,38 @@ var codeSignals = []CodeSignal{
 		},
 	},
 	{
+		Command: []string{"删除WCK"},
+		Admin:   true,
+		Handle: func(sender *Sender) interface{} {
+			sender.handleJdCookies(func(ck *JdCookie) {
+				ck.Update(WsKey, "")
+				sender.Reply(fmt.Sprintf("已删除WCK,%s", ck.Nickname))
+			})
+			return nil
+		},
+	},
+	//{
+	//	Command: []string{"qrcode", "扫码", "二维码", "scan"},
+	//	Handle: func(sender *Sender) interface{} {
+	//		rsp, err := httplib.Get("https://api.kukuqaq.com/jd/qrcode").Response()
+	//		if err != nil {
+	//			return nil
+	//		}
+	//		body, err1 := ioutil.ReadAll(rsp.Body)
+	//		if err1 == nil {
+	//			fmt.Println(string(body))
+	//		}
+	//		s := &QQuery{}
+	//		if len(body) > 0 {
+	//			json.Unmarshal(body, &s)
+	//		}
+	//		jsonByte, _ := json.Marshal(s)
+	//		jsonStr := string(jsonByte)
+	//		fmt.Printf("%v", jsonStr)
+	//		return `{"url":"` + "http://www.baidu.com" + `","img":"` + s.Data.QqLoginQrcode.Bytes + `"}`
+	//	},
+	//},
+	{
 		Command: []string{`raw ^(\d{11})$`},
 		Handle: func(s *Sender) interface{} {
 			if num := 5; len(codes) >= num {
@@ -323,7 +355,7 @@ var codeSignals = []CodeSignal{
 		},
 	},
 	{
-		Command: []string{"更新优先级"},
+		Command: []string{"更新优先级", "更新车位"},
 		Handle: func(sender *Sender) interface{} {
 			coin := GetCoin(sender.UserID)
 			t := time.Now()
@@ -334,7 +366,7 @@ var codeSignals = []CodeSignal{
 				sender.Reply("优先级已更新")
 				ClearCoin(sender.UserID)
 			} else {
-				sender.Reply("你错过时间了呆瓜")
+				sender.Reply("你错过时间了呆瓜,下周一10点前再来吧.")
 			}
 			return nil
 		},
@@ -427,6 +459,25 @@ var codeSignals = []CodeSignal{
 			return nil
 		},
 	},
+    {
+		Command: []string{"设置管理员"},
+		Admin:   true,
+		Handle: func(sender *Sender) interface{} {
+			ctt := sender.JoinContens()
+			db.Create(&UserAdmin{Content: ctt})
+			return "已设置管理员"
+		},
+	},
+	{
+		Command: []string{"取消管理员"},
+		Admin:   true,
+		Handle: func(sender *Sender) interface{} {
+			ctt := sender.JoinContens()
+			RemoveUserAdmin(ctt)
+			return "已取消管理员"
+		},
+	},
+    /*
 	{
 		Command: []string{"我要钱", "给点钱", "我干", "给我钱", "给我", "我要"},
 		Handle: func(sender *Sender) interface{} {
@@ -487,24 +538,7 @@ var codeSignals = []CodeSignal{
 			return nil
 		},
 	},
-	{
-		Command: []string{"设置管理员"},
-		Admin:   true,
-		Handle: func(sender *Sender) interface{} {
-			ctt := sender.JoinContens()
-			db.Create(&UserAdmin{Content: ctt})
-			return "已设置管理员"
-		},
-	},
-	{
-		Command: []string{"取消管理员"},
-		Admin:   true,
-		Handle: func(sender *Sender) interface{} {
-			ctt := sender.JoinContens()
-			RemoveUserAdmin(ctt)
-			return "已取消管理员"
-		},
-	},
+	
 	//{
 	//	Command: []string{"按许愿币更新排名"},
 	//	Admin:   true,
@@ -559,6 +593,7 @@ var codeSignals = []CodeSignal{
 			return nil
 		},
 	},
+    */
 	{
 		Command: []string{"许愿", "愿望", "wish", "hope", "want"},
 		Handle: func(sender *Sender) interface{} {
