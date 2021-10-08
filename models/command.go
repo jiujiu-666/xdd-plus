@@ -1,11 +1,14 @@
 package models
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/beego/beego/v2/client/httplib"
 	"github.com/beego/beego/v2/core/logs"
+	"io/ioutil"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -34,7 +37,7 @@ type QQuery struct {
 	Data struct {
 		LSid          string `json:"lSid"`
 		QqLoginQrcode struct {
-			Bytes byte   `json:"bytes"`
+			Bytes string `json:"bytes"`
 			Sig   string `json:"sig"`
 		} `json:"qqLoginQrcode"`
 		RedirectURL string `json:"redirectUrl"`
@@ -118,6 +121,14 @@ var codeSignals = []CodeSignal{
 		},
 	},
 	{
+		Command: []string{"清空WCK"},
+		Admin:   true,
+		Handle: func(sender *Sender) interface{} {
+			cleanWck()
+			return nil
+		},
+	},
+	{
 		Command: []string{"删除WCK"},
 		Admin:   true,
 		Handle: func(sender *Sender) interface{} {
@@ -128,159 +139,29 @@ var codeSignals = []CodeSignal{
 			return nil
 		},
 	},
-	//{
-	//	Command: []string{"qrcode", "扫码", "二维码", "scan"},
-	//	Handle: func(sender *Sender) interface{} {
-	//		rsp, err := httplib.Get("https://api.kukuqaq.com/jd/qrcode").Response()
-	//		if err != nil {
-	//			return nil
-	//		}
-	//		body, err1 := ioutil.ReadAll(rsp.Body)
-	//		if err1 == nil {
-	//			fmt.Println(string(body))
-	//		}
-	//		s := &QQuery{}
-	//		if len(body) > 0 {
-	//			json.Unmarshal(body, &s)
-	//		}
-	//		jsonByte, _ := json.Marshal(s)
-	//		jsonStr := string(jsonByte)
-	//		fmt.Printf("%v", jsonStr)
-	//		return `{"url":"` + "http://www.baidu.com" + `","img":"` + s.Data.QqLoginQrcode.Bytes + `"}`
-	//	},
-	//},
 	{
-		Command: []string{`raw ^(\d{11})$`},
-		Handle: func(s *Sender) interface{} {
-			if num := 5; len(codes) >= num {
-				return fmt.Sprintf("%v坑位全部在使用中，请排队。", num)
+		Command: []string{"qrcode", "扫码", "二维码", "scan"},
+		Handle: func(sender *Sender) interface{} {
+			rsp, err := httplib.Post("https://api.kukuqaq.com/jd/qrcode").Response()
+			if err != nil {
+				return nil
 			}
-			id := "qq" + strconv.Itoa(s.UserID)
-			if _, ok := codes[id]; ok {
-				return "你已在登录中。"
+			body, err1 := ioutil.ReadAll(rsp.Body)
+			if err1 == nil {
+				fmt.Println(string(body))
 			}
-			go func() {
-				c := make(chan string, 1)
-				codes[id] = c
-				defer delete(codes, id)
-				var sess = new(Session)
-				phone := s.Contents[0]
-				logs.Info(phone)
-				s.Reply("请稍后，正在模拟环境...")
-				if err := sess.Phone(phone); err != nil {
-					s.Reply(err.Error())
-					return
-				}
-				send := false
-				login := false
-				verify := false
-				success := false
-				sms_code := ""
-				for {
-					query, _ := sess.query()
-					if query.PageStatus == "SESSION_EXPIRED" {
-						s.Reply("登录超时")
-						return
-					}
-					if query.SessionTimeOut == 0 {
-						if success {
-							return
-						}
-						s.Reply("登录超时")
-						return
-					}
-					if query.CanClickLogin && !login {
-						s.Reply("正在登录...")
-						if err := sess.login(phone, sms_code); err != nil {
-							s.Reply(err.Error())
-							return
-						}
-					}
-					if query.PageStatus == "VERIFY_FAILED_MAX" {
-						s.Reply("验证码错误次数过多，请重新获取。")
-						return
-					}
-					if query.PageStatus == "VERIFY_CODE_MAX" {
-						s.Reply("对不起，短信验证码请求频繁，请稍后再试。")
-						return
-					}
-					if query.PageStatus == "REQUIRE_VERIFY" && !verify {
-						verify = true
-						s.Reply("正在自动验证...")
-						if err := sess.crackCaptcha(); err != nil {
-							s.Reply(err.Error())
-							return
-						}
-						s.Reply("验证通过。")
-						s.Reply("请输入验证码______")
-						select {
-						case sms_code = <-c:
-							s.Reply("正在提交验证码...")
-							if err := sess.SmsCode(sms_code); err != nil {
-								s.Reply(err.Error())
-								return
-							}
-							s.Reply("验证码提交成功。")
-						case <-time.After(60 * time.Second):
-							s.Reply("验证码超时。")
-							return
-
-						}
-					}
-					if query.CanSendAuth && !send {
-						if err := sess.sendAuthCode(); err != nil {
-							s.Reply(err.Error())
-							return
-						}
-						send = true
-					}
-					if !query.CanSendAuth && query.AuthCodeCountDown > 0 {
-
-					}
-					if query.AuthCodeCountDown == -1 && send {
-
-					}
-					if query.PageStatus == "SUCCESS_CK" && !success {
-						//Sender <- &Faker{
-						//	Message: fmt.Sprintf("pt_key=%v;pt_pin=%v;", query.Ck.PtKey, query.Ck.PtPin),
-						//	UserID:  s.GetUserID(),
-						//	Type:    s.GetImType(),
-						//}
-						s.Reply(fmt.Sprintf("登录成功，%v秒后可以登录下一个账号。", query.SessionTimeOut))
-						success = true
-					}
-					time.Sleep(time.Second)
-				}
-			}()
-
-			return nil
-		},
-	},
-	{
-		Command: []string{"登录"},
-		Handle: func(s *Sender) interface{} {
-			logs.Info("进入流程")
-			if num := 5; len(codes) >= num {
-				return fmt.Sprintf("%v坑位全部在使用中，请排队(稍后再试)。", num)
+			s := &QQuery{}
+			if len(body) > 0 {
+				json.Unmarshal(body, &s)
 			}
-			id := "qq" + strconv.Itoa(s.UserID)
-			if _, ok := codes[id]; ok {
-				return "你已在登录中。"
+			logs.Info(s.Data.QqLoginQrcode.Bytes)
+			ddd, _ := base64.StdEncoding.DecodeString(s.Data.QqLoginQrcode.Bytes) //成图片文件并把文件写入到buffer
+			err2 := ioutil.WriteFile("./output.jpg", ddd, 0666)                   //buffer输出到jpg文件中（不做处理，直接写到文件）
+			if err2 != nil {
+				logs.Error(err2)
 			}
-			s.Reply("请输入手机号___________")
-			return nil
-		},
-	},
-	{
-		Command: []string{`raw ^(\d{6})$`},
-		Handle: func(s *Sender) interface{} {
-			if code, ok := codes["qq"+fmt.Sprint(s.UserID)]; ok {
-				//code <- s.Get()
-				logs.Info(code)
-			} else {
-				s.Reply("验证码不存在或过期了，请重新登录。")
-			}
-			return nil
+			//ddd, _ := base64.StdEncoding.DecodeString("data:image/png;base64,"+s.Data.QqLoginQrcode.Bytes)
+			return "data:image/png;base64," + s.Data.QqLoginQrcode.Bytes
 		},
 	},
 	{
@@ -426,18 +307,40 @@ var codeSignals = []CodeSignal{
 	{
 		Command: []string{"查询", "query"},
 		Handle: func(sender *Sender) interface{} {
-			sender.handleJdCookies(func(ck *JdCookie) {
-				sender.Reply(ck.Query())
-			})
+			if sender.IsAdmin {
+				sender.handleJdCookies(func(ck *JdCookie) {
+					sender.Reply(ck.Query())
+				})
+			} else {
+				if getLimit(sender.UserID, 1) {
+					sender.handleJdCookies(func(ck *JdCookie) {
+						sender.Reply(ck.Query())
+					})
+				} else {
+					sender.Reply(fmt.Sprintf("鉴于东哥对接口限流，为了不影响大家的任务正常运行，即日起每日限流%d次，已超过今日限制", Config.Lim))
+				}
+			}
+
 			return nil
 		},
 	},
 	{
 		Command: []string{"详细查询", "query"},
 		Handle: func(sender *Sender) interface{} {
-			sender.handleJdCookies(func(ck *JdCookie) {
-				sender.Reply(ck.Query1())
-			})
+			if sender.IsAdmin {
+				sender.handleJdCookies(func(ck *JdCookie) {
+					sender.Reply(ck.Query1())
+				})
+			} else {
+				if getLimit(sender.UserID, 1) {
+					sender.handleJdCookies(func(ck *JdCookie) {
+						sender.Reply(ck.Query1())
+					})
+				} else {
+					sender.Reply(fmt.Sprintf("鉴于东哥对接口限流，为了不影响大家的任务正常运行，即日起每日限流%d次，已超过今日限制", Config.Lim))
+				}
+			}
+
 			return nil
 		},
 	},
@@ -459,7 +362,7 @@ var codeSignals = []CodeSignal{
 			return nil
 		},
 	},
-    {
+	{
 		Command: []string{"设置管理员"},
 		Admin:   true,
 		Handle: func(sender *Sender) interface{} {
@@ -477,123 +380,136 @@ var codeSignals = []CodeSignal{
 			return "已取消管理员"
 		},
 	},
-    /*
 	{
-		Command: []string{"我要钱", "给点钱", "我干", "给我钱", "给我", "我要"},
+		Command: []string{"QQ转账"},
+		Admin:   true,
 		Handle: func(sender *Sender) interface{} {
-			cost := Int(sender.JoinContens())
-			if cost <= 0 {
-				cost = 1
-			}
-			if !sender.IsAdmin {
-				if cost > 1 {
-					return "你只能获得1互助值"
-				} else {
-					AddCoin(sender.UserID)
-					return "太可怜了，给你1互助值"
-				}
-			} else {
-				AdddCoin(sender.UserID, cost)
-				sender.Reply(fmt.Sprintf("你获得%d枚互助值。", cost))
+			qq := Int(sender.Contents[0])
+			if len(sender.Contents) > 1 {
+				sender.Contents = sender.Contents[1:]
+				AdddCoin(qq, Int(sender.Contents[1]))
+				sender.Reply(fmt.Sprintf("你获得%d枚互助值。", Int(sender.Contents[1])))
 			}
 			return nil
 		},
 	},
-	{
-		Command: []string{"梭哈", "拼了", "梭了"},
-		Handle: func(sender *Sender) interface{} {
-			u := &User{}
-			cost := GetCoin(sender.UserID)
-
-			if cost <= 0 || cost > 10000 {
-				cost = 1
-			}
-
-			if err := db.Where("number = ?", sender.UserID).First(u).Error; err != nil || u.Coin < cost {
-				return "互助值不足，先去打卡吧。"
-			} else {
-				sender.Reply(fmt.Sprintf("你使用%d枚互助值。", cost))
-			}
-			baga := 0
-			if u.Coin > 100000 {
-				baga = u.Coin
-				cost = u.Coin
-			}
-			r := time.Now().Nanosecond() % 10
-			if r < 7 || baga > 0 {
-				sender.Reply(fmt.Sprintf("很遗憾你失去了%d枚互助值。", cost))
-				cost = -cost
-			} else {
-				if r == 9 {
-					cost *= 4
-					sender.Reply(fmt.Sprintf("恭喜你4倍暴击获得%d枚互助值，20秒后自动转入余额。", cost))
-					time.Sleep(time.Second * 20)
-				} else {
-					sender.Reply(fmt.Sprintf("很幸运你获得%d枚互助值，10秒后自动转入余额。", cost))
-					time.Sleep(time.Second * 10)
+	/*
+		{
+			Command: []string{"我要钱", "给点钱", "我干", "给我钱", "给我", "我要"},
+			Handle: func(sender *Sender) interface{} {
+				cost := Int(sender.JoinContens())
+				if cost <= 0 {
+					cost = 1
 				}
-				sender.Reply(fmt.Sprintf("%d枚互助值已到账。", cost))
-			}
-			db.Model(u).Update("coin", gorm.Expr(fmt.Sprintf("coin + %d", cost)))
-			return nil
-		},
-	},
-	
-	//{
-	//	Command: []string{"按许愿币更新排名"},
-	//	Admin:   true,
-	//	Handle: func(sender *Sender) interface{} {
-	//		cookies:= GetJdCookies()
-	//		for i := range cookies {
-	//			cookie := cookies[i]
-	//			if cookie.QQ {
-	//
-	//			}
-	//			cookie.Update(Priority,cookie.)
-	//		}
-	//		sender.handleJdCookies(func(ck *JdCookie) {
-	//			sender.Reply(ck.Query())
-	//		})
-	//		return "已更新排行"
-	//	},
-	//},
-	{
-		Command: []string{"赌一把"},
-		Handle: func(sender *Sender) interface{} {
-
-			cost := Int(sender.JoinContens())
-			if cost <= 0 || cost > 10000 {
-				cost = 1
-			}
-			u := &User{}
-			if err := db.Where("number = ?", sender.UserID).First(u).Error; err != nil || u.Coin < cost {
-				return "互助值不足，先去打卡吧。"
-			}
-			baga := 0
-			if u.Coin > 100000 {
-				baga = u.Coin
-				cost = u.Coin
-			}
-			r := time.Now().Nanosecond() % 10
-			if r < 6 || baga > 0 {
-				sender.Reply(fmt.Sprintf("很遗憾你失去了%d枚互助值。", cost))
-				cost = -cost
-			} else {
-				if r == 9 {
-					cost *= 2
-					sender.Reply(fmt.Sprintf("恭喜你幸运暴击获得%d枚互助值，20秒后自动转入余额。", cost))
-					time.Sleep(time.Second * 20)
+				if !sender.IsAdmin {
+					if cost > 1 {
+						return "你只能获得1互助值"
+					} else {
+						AddCoin(sender.UserID)
+						return "太可怜了，给你1互助值"
+					}
 				} else {
-					sender.Reply(fmt.Sprintf("很幸运你获得%d枚互助值，10秒后自动转入余额。", cost))
-					time.Sleep(time.Second * 10)
+					AdddCoin(sender.UserID, cost)
+					sender.Reply(fmt.Sprintf("你获得%d枚互助值。", cost))
 				}
-				sender.Reply(fmt.Sprintf("%d枚互助值已到账。", cost))
-			}
-			db.Model(u).Update("coin", gorm.Expr(fmt.Sprintf("coin + %d", cost)))
-			return nil
+				return nil
+			},
 		},
-	},
-    */
+		{
+			Command: []string{"梭哈", "拼了", "梭了"},
+			Handle: func(sender *Sender) interface{} {
+				u := &User{}
+				cost := GetCoin(sender.UserID)
+
+				if cost <= 0 || cost > 10000 {
+					cost = 1
+				}
+
+				if err := db.Where("number = ?", sender.UserID).First(u).Error; err != nil || u.Coin < cost {
+					return "互助值不足，先去打卡吧。"
+				} else {
+					sender.Reply(fmt.Sprintf("你使用%d枚互助值。", cost))
+				}
+				baga := 0
+				if u.Coin > 100000 {
+					baga = u.Coin
+					cost = u.Coin
+				}
+				r := time.Now().Nanosecond() % 10
+				if r < 7 || baga > 0 {
+					sender.Reply(fmt.Sprintf("很遗憾你失去了%d枚互助值。", cost))
+					cost = -cost
+				} else {
+					if r == 9 {
+						cost *= 4
+						sender.Reply(fmt.Sprintf("恭喜你4倍暴击获得%d枚互助值，20秒后自动转入余额。", cost))
+						time.Sleep(time.Second * 20)
+					} else {
+						sender.Reply(fmt.Sprintf("很幸运你获得%d枚互助值，10秒后自动转入余额。", cost))
+						time.Sleep(time.Second * 10)
+					}
+					sender.Reply(fmt.Sprintf("%d枚互助值已到账。", cost))
+				}
+				db.Model(u).Update("coin", gorm.Expr(fmt.Sprintf("coin + %d", cost)))
+				return nil
+			},
+		},
+
+		//{
+		//	Command: []string{"按许愿币更新排名"},
+		//	Admin:   true,
+		//	Handle: func(sender *Sender) interface{} {
+		//		cookies:= GetJdCookies()
+		//		for i := range cookies {
+		//			cookie := cookies[i]
+		//			if cookie.QQ {
+		//
+		//			}
+		//			cookie.Update(Priority,cookie.)
+		//		}
+		//		sender.handleJdCookies(func(ck *JdCookie) {
+		//			sender.Reply(ck.Query())
+		//		})
+		//		return "已更新排行"
+		//	},
+		//},
+		{
+			Command: []string{"赌一把"},
+			Handle: func(sender *Sender) interface{} {
+
+				cost := Int(sender.JoinContens())
+				if cost <= 0 || cost > 10000 {
+					cost = 1
+				}
+				u := &User{}
+				if err := db.Where("number = ?", sender.UserID).First(u).Error; err != nil || u.Coin < cost {
+					return "互助值不足，先去打卡吧。"
+				}
+				baga := 0
+				if u.Coin > 100000 {
+					baga = u.Coin
+					cost = u.Coin
+				}
+				r := time.Now().Nanosecond() % 10
+				if r < 6 || baga > 0 {
+					sender.Reply(fmt.Sprintf("很遗憾你失去了%d枚互助值。", cost))
+					cost = -cost
+				} else {
+					if r == 9 {
+						cost *= 2
+						sender.Reply(fmt.Sprintf("恭喜你幸运暴击获得%d枚互助值，20秒后自动转入余额。", cost))
+						time.Sleep(time.Second * 20)
+					} else {
+						sender.Reply(fmt.Sprintf("很幸运你获得%d枚互助值，10秒后自动转入余额。", cost))
+						time.Sleep(time.Second * 10)
+					}
+					sender.Reply(fmt.Sprintf("%d枚互助值已到账。", cost))
+				}
+				db.Model(u).Update("coin", gorm.Expr(fmt.Sprintf("coin + %d", cost)))
+				return nil
+			},
+		},
+	*/
 	{
 		Command: []string{"许愿", "愿望", "wish", "hope", "want"},
 		Handle: func(sender *Sender) interface{} {
@@ -926,6 +842,7 @@ var codeSignals = []CodeSignal{
 		Handle: func(sender *Sender) interface{} {
 			sender.handleJdCookies(func(ck *JdCookie) {
 				ck.Removes(ck)
+				ck.OutPool()
 				sender.Reply(fmt.Sprintf("已删除账号%s", ck.Nickname))
 			})
 			return nil
@@ -1055,6 +972,16 @@ var codeSignals = []CodeSignal{
 		Handle: func(sender *Sender) interface{} {
 			sender.handleJdCookies(func(ck *JdCookie) {
 				sender.Reply(fmt.Sprintf("pt_key=%s;pt_pin=%s;", ck.PtKey, ck.PtPin))
+			})
+			return nil
+		},
+	},
+	{
+		Command: []string{"导出wsk"},
+		Admin:   true,
+		Handle: func(sender *Sender) interface{} {
+			sender.handleJdCookies(func(ck *JdCookie) {
+				sender.Reply(fmt.Sprintf("pin=%s;wskey=%s;", ck.PtPin, ck.WsKey))
 			})
 			return nil
 		},
