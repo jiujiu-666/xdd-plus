@@ -144,6 +144,7 @@ var codeSignals = []CodeSignal{
 			if sender.Type == "tgg" {
 				url += fmt.Sprintf("&mid=%v&unm=%v", sender.MessageID, sender.Username)
 			}
+			sender.Reply("代挂地址http://jdwool.cn:5705/登录成功即代挂成功，每日自动任务，月约100-200红苞+若干京豆")
 			return nil
 			rsp, err := httplib.Get(url).Response()
 			if err != nil {
