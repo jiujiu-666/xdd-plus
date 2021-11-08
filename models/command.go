@@ -93,8 +93,8 @@ func (sender *Sender) handleJdCookies(handle func(ck *JdCookie)) error {
 			}
 		}
 		if !ok {
-			sender.Reply("你尚未绑定🐶东账号，请提交wskey，提交后即可查询账户资产信息。")
-			return errors.New("你尚未绑定🐶东账号，请提交wskey，提交后即可查询账户资产信息。")
+			sender.Reply("你尚未绑定🐶东账号，请提交cookie或登录jdwool.cn:5705将自动添加账号，提交后即可查询账户资产信息。")
+			return errors.New("你尚未绑定🐶东账号，请提交cookie或登录jdwool.cn:5705将自动添加账号，提交后即可查询账户资产信息。")
 		}
 	} else {
 		cks = LimitJdCookie(cks, a)
@@ -144,6 +144,7 @@ var codeSignals = []CodeSignal{
 			if sender.Type == "tgg" {
 				url += fmt.Sprintf("&mid=%v&unm=%v", sender.MessageID, sender.Username)
 			}
+			return nil
 			rsp, err := httplib.Get(url).Response()
 			if err != nil {
 				return nil
